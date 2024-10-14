@@ -116,6 +116,7 @@ func init() {
 	world.RegisterItem(Spyglass{})
 	world.RegisterItem(Stick{})
 	world.RegisterItem(Sugar{})
+	world.RegisterItem(Totem{})
 	world.RegisterItem(TropicalFish{})
 	world.RegisterItem(TurtleShell{})
 	world.RegisterItem(WarpedFungusOnAStick{})
@@ -126,6 +127,9 @@ func init() {
 		world.RegisterItem(Chestplate{Tier: t})
 		world.RegisterItem(Leggings{Tier: t})
 		world.RegisterItem(Boots{Tier: t})
+	}
+	for _, t := range SmithingTemplates() {
+		world.RegisterItem(SmithingTemplate{Template: t})
 	}
 	for _, pattern := range BannerPatterns() {
 		world.RegisterItem(BannerPattern{Type: pattern})
@@ -157,5 +161,8 @@ func init() {
 	}
 	for _, stew := range StewTypes() {
 		world.RegisterItem(SuspiciousStew{Type: stew})
+	}
+	for _, sherd := range SherdTypes() {
+		world.RegisterItem(PotterySherd{Type: sherd})
 	}
 }

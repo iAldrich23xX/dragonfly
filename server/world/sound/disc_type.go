@@ -1,5 +1,10 @@
 package sound
 
+import (
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+)
+
 // DiscType represents the type of music disc. Typically, Minecraft has a total of 15 music discs.
 type DiscType struct {
 	disc
@@ -80,11 +85,32 @@ func Disc5() DiscType {
 	return DiscType{14}
 }
 
+// DiscRelic returns the music disc "Relic".
+func DiscRelic() DiscType {
+	return DiscType{15}
+}
+
+// DiscCreator returns the music disc "Creator".
+func DiscCreator() DiscType {
+	return DiscType{16}
+}
+
+// DiscCreatorMusicBox returns the music disc "Creator (Music Box)".
+func DiscCreatorMusicBox() DiscType {
+	return DiscType{17}
+}
+
+// DiscPrecipice returns the music disc "Precipice".
+func DiscPrecipice() DiscType {
+	return DiscType{18}
+}
+
 // MusicDiscs returns a list of all existing music discs.
 func MusicDiscs() []DiscType {
 	return []DiscType{
 		Disc13(), DiscCat(), DiscBlocks(), DiscChirp(), DiscFar(), DiscMall(), DiscMellohi(), DiscStal(),
-		DiscStrad(), DiscWard(), Disc11(), DiscWait(), DiscOtherside(), DiscPigstep(), Disc5(),
+		DiscStrad(), DiscWard(), Disc11(), DiscWait(), DiscOtherside(), DiscPigstep(), Disc5(), DiscRelic(),
+		DiscCreator(), DiscCreatorMusicBox(), DiscPrecipice(),
 	}
 }
 
@@ -129,14 +155,26 @@ func (d disc) String() string {
 		return "pigstep"
 	case 14:
 		return "5"
+	case 15:
+		return "relic"
+	case 16:
+		return "creator"
+	case 17:
+		return "creator_music_box"
+	case 18:
+		return "precipice"
 	}
 	panic("unknown record type")
 }
 
 // DisplayName ...
 func (d disc) DisplayName() string {
-	if d == 13 {
-		return "Pigstep"
+	switch d {
+	case 17:
+		return "Creator (Music Box)"
+	}
+	if d > 12 {
+		return cases.Title(language.English, cases.Compact).String(d.String())
 	}
 	return d.String()
 }
@@ -147,10 +185,12 @@ func (d disc) Author() string {
 		return "C418"
 	}
 	switch d {
-	case 12, 13:
+	case 12, 13, 16, 17:
 		return "Lena Raine"
 	case 14:
 		return "Samuel Åberg"
+	case 15, 18:
+		return "Aaron Cherof"
 	}
 	panic("unknown record type")
 }

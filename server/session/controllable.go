@@ -7,6 +7,7 @@ import (
 	"github.com/df-mc/dragonfly/server/item"
 	"github.com/df-mc/dragonfly/server/item/inventory"
 	"github.com/df-mc/dragonfly/server/player/chat"
+	"github.com/df-mc/dragonfly/server/player/diagnostics"
 	"github.com/df-mc/dragonfly/server/player/form"
 	"github.com/df-mc/dragonfly/server/player/skin"
 	"github.com/df-mc/dragonfly/server/world"
@@ -83,7 +84,9 @@ type Controllable interface {
 
 	Exhaust(points float64)
 
-	EditSign(pos cube.Pos, text string) error
+	OpenSign(pos cube.Pos, frontSide bool)
+	EditSign(pos cube.Pos, frontText, backText string) error
+	TurnLecternPage(pos cube.Pos, page int) error
 
 	EnderChestInventory() *inventory.Inventory
 
@@ -97,4 +100,6 @@ type Controllable interface {
 	// entity looks in the world.
 	Skin() skin.Skin
 	SetSkin(skin.Skin)
+
+	UpdateDiagnostics(diagnostics.Diagnostics)
 }

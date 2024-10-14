@@ -27,6 +27,20 @@ func (s *Session) parseEntityMetadata(e world.Entity) protocol.EntityMetadata {
 
 	m.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagHasGravity)
 	m.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagClimb)
+	if g, ok := e.Type().(glint); ok && g.Glint() {
+		m.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagEnchanted)
+	}
+	if _, ok := e.Type().(entity.LingeringPotionType); ok {
+		m.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagLingering)
+	}
+	s.addSpecificMetadata(e, m)
+	if ent, ok := e.(*entity.Ent); ok {
+		s.addSpecificMetadata(ent.Behaviour(), m)
+	}
+	return m
+}
+
+func (s *Session) addSpecificMetadata(e any, m protocol.EntityMetadata) {
 	if sn, ok := e.(sneaker); ok && sn.Sneaking() {
 		m.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagSneaking)
 	}
@@ -115,8 +129,9 @@ func (s *Session) parseEntityMetadata(e world.Entity) protocol.EntityMetadata {
 	if l, ok := e.(living); ok && s.c == e {
 		deathPos, deathDimension, died := l.DeathPosition()
 		if died {
+			dim, _ := world.DimensionID(deathDimension)
 			m[protocol.EntityDataKeyPlayerLastDeathPosition] = vec64To32(deathPos)
-			m[protocol.EntityDataKeyPlayerLastDeathDimension] = int32(deathDimension.EncodeDimension())
+			m[protocol.EntityDataKeyPlayerLastDeathDimension] = int32(dim)
 		}
 		m[protocol.EntityDataKeyPlayerHasDied] = boolByte(died)
 	}
@@ -126,30 +141,29 @@ func (s *Session) parseEntityMetadata(e world.Entity) protocol.EntityMetadata {
 			m[protocol.EntityDataKeyCustomDisplay] = tip + 1
 		}
 	}
-	if g, ok := e.Type().(glint); ok && g.Glint() {
-		m.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagEnchanted)
-	}
-	if _, ok := e.Type().(entity.LingeringPotionType); ok {
-		m.SetFlag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagLingering)
-	}
-	if eff, ok := e.(effectBearer); ok && len(eff.Effects()) > 0 {
-		visibleEffects := make([]effect.Effect, 0, len(eff.Effects()))
+	if eff, ok := e.(effectBearer); ok {
+		var packedEffects int64
+
 		for _, ef := range eff.Effects() {
 			if !ef.ParticlesHidden() {
-				visibleEffects = append(visibleEffects, ef)
+				id, found := effect.ID(ef.Type())
+				if !found {
+					continue
+				}
+				packedEffects = (packedEffects << 7) | int64(id<<1)
+				if ef.Ambient() {
+					packedEffects |= 1
+				}
 			}
 		}
-		if len(visibleEffects) > 0 {
-			colour, am := effect.ResultingColour(visibleEffects)
-			m[protocol.EntityDataKeyEffectColor] = nbtconv.Int32FromRGBA(colour)
-			if am {
-				m[protocol.EntityDataKeyEffectAmbience] = byte(1)
-			} else {
-				m[protocol.EntityDataKeyEffectAmbience] = byte(0)
-			}
-		}
+		m[protocol.EntityDataKeyVisibleMobEffects] = packedEffects
 	}
-	return m
+	if v, ok := e.(variable); ok {
+		m[protocol.EntityDataKeyVariant] = v.Variant()
+	}
+	if mv, ok := e.(markVariable); ok {
+		m[protocol.EntityDataKeyMarkVariant] = mv.MarkVariant()
+	}
 }
 
 type sneaker interface {
@@ -208,7 +222,6 @@ type glint interface {
 
 type areaEffectCloud interface {
 	effectBearer
-	Duration() time.Duration
 	Radius() float64
 }
 
@@ -247,4 +260,12 @@ type tnt interface {
 
 type living interface {
 	DeathPosition() (mgl64.Vec3, world.Dimension, bool)
+}
+
+type variable interface {
+	Variant() int32
+}
+
+type markVariable interface {
+	MarkVariant() int32
 }

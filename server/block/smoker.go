@@ -20,13 +20,13 @@ type Smoker struct {
 	*smelter
 
 	// Facing is the direction the smoker is facing.
-	Facing cube.Face
+	Facing cube.Direction
 	// Lit is true if the smoker is lit.
 	Lit bool
 }
 
 // NewSmoker creates a new initialised smoker. The smelter is properly initialised.
-func NewSmoker(face cube.Face) Smoker {
+func NewSmoker(face cube.Direction) Smoker {
 	return Smoker{
 		Facing:  face,
 		smelter: newSmelter(),
@@ -54,9 +54,9 @@ func (s Smoker) EncodeItem() (name string, meta int16) {
 // EncodeBlock ...
 func (s Smoker) EncodeBlock() (name string, properties map[string]interface{}) {
 	if s.Lit {
-		return "minecraft:lit_smoker", map[string]interface{}{"facing_direction": int32(s.Facing)}
+		return "minecraft:lit_smoker", map[string]interface{}{"minecraft:cardinal_direction": s.Facing.String()}
 	}
-	return "minecraft:smoker", map[string]interface{}{"facing_direction": int32(s.Facing)}
+	return "minecraft:smoker", map[string]interface{}{"minecraft:cardinal_direction": s.Facing.String()}
 }
 
 // UseOnBlock ...
@@ -66,14 +66,18 @@ func (s Smoker) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, w *world.
 		return false
 	}
 
-	place(w, pos, NewSmoker(user.Rotation().Direction().Face().Opposite()), user, ctx)
+	place(w, pos, NewSmoker(user.Rotation().Direction().Opposite()), user, ctx)
 	return placed(ctx)
 }
 
 // BreakInfo ...
 func (s Smoker) BreakInfo() BreakInfo {
 	xp := s.Experience()
-	return newBreakInfo(3.5, alwaysHarvestable, pickaxeEffective, oneOf(s)).withXPDropRange(xp, xp)
+	return newBreakInfo(3.5, alwaysHarvestable, pickaxeEffective, oneOf(s)).withXPDropRange(xp, xp).withBreakHandler(func(pos cube.Pos, w *world.World, u item.User) {
+		for _, i := range s.Inventory(w, pos).Clear() {
+			dropItem(w, i, pos.Vec3())
+		}
+	})
 }
 
 // Activate ...
@@ -97,7 +101,7 @@ func (s Smoker) EncodeNBT() map[string]interface{} {
 		"CookTime":     int16(cook.Milliseconds() / 50),
 		"BurnDuration": int16(maximum.Milliseconds() / 50),
 		"StoredXPInt":  int16(s.Experience()),
-		"Items":        nbtconv.InvToNBT(s.Inventory()),
+		"Items":        nbtconv.InvToNBT(s.inventory),
 		"id":           "Smoker",
 	}
 }
@@ -116,13 +120,13 @@ func (s Smoker) DecodeNBT(data map[string]interface{}) interface{} {
 	s.Lit = lit
 	s.setExperience(xp)
 	s.setDurations(remaining, maximum, cook)
-	nbtconv.InvFromNBT(s.Inventory(), nbtconv.Slice(data, "Items"))
+	nbtconv.InvFromNBT(s.inventory, nbtconv.Slice(data, "Items"))
 	return s
 }
 
 // allSmokers ...
 func allSmokers() (smokers []world.Block) {
-	for _, face := range cube.Faces() {
+	for _, face := range cube.Directions() {
 		smokers = append(smokers, Smoker{Facing: face})
 		smokers = append(smokers, Smoker{Facing: face, Lit: true})
 	}

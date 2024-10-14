@@ -4,9 +4,14 @@ import (
 	"fmt"
 	"github.com/brentp/intintmap"
 	"github.com/df-mc/dragonfly/server/block/cube"
+	"github.com/df-mc/dragonfly/server/block/customblock"
 	"github.com/df-mc/dragonfly/server/world/chunk"
+	"github.com/segmentio/fasthash/fnv1"
+	"image"
 	"math"
+	"math/bits"
 	"math/rand"
+	"sort"
 )
 
 // Block is a block that may be placed or found in a world. In addition, the block may also be added to an
@@ -16,13 +21,34 @@ type Block interface {
 	// EncodeBlock encodes the block to a string ID such as 'minecraft:grass' and properties associated
 	// with the block.
 	EncodeBlock() (string, map[string]any)
-	// Hash returns a unique identifier of the block including the block states. This function is used internally to
-	// convert a block to a single integer which can be used in map lookups. The hash produced therefore does not need
-	// to match anything in the game, but it must be unique among all registered blocks.
-	// The tool in `/cmd/blockhash` may be used to automatically generate block hashes of blocks in a package.
-	Hash() uint64
+	// Hash returns two different identifiers for the block. The first is the base hash which is unique for
+	// each type of block at runtime. For vanilla blocks, this is an auto-incrementing constant and for custom
+	// blocks, you can call block.NextHash() to get a unique identifier. The second is the hash of the block's
+	// own state and does not need to worry about colliding with other types of blocks. This is later combined
+	// with the base hash to create a unique identifier for the full block.
+	Hash() (uint64, uint64)
 	// Model returns the BlockModel of the Block.
 	Model() BlockModel
+}
+
+// CustomBlock represents a block that is non-vanilla and requires a resource pack and extra steps to show it to the
+// client.
+type CustomBlock interface {
+	Block
+	Properties() customblock.Properties
+}
+
+type CustomBlockBuildable interface {
+	CustomBlock
+	// Name is the name displayed to clients using the block.
+	Name() string
+	// Geometries is the geometries for the block that define the shape of the block. If false is returned, no custom
+	// geometry will be applied. Permutation-specific geometry can be defined by returning a map of permutations to
+	// geometry.
+	Geometry() []byte
+	// Textures is a map of images indexed by their target, used to map textures on to the block. Permutation-specific
+	// textures can be defined by returning a map of permutations to textures.
+	Textures() map[string]image.Image
 }
 
 // Liquid represents a block that can be moved through and which can flow in the world after placement. There
@@ -51,15 +77,22 @@ type Liquid interface {
 
 // hashes holds a list of runtime IDs indexed by the hash of the Block that implements the blocks pointed to by those
 // runtime IDs. It is used to look up a block's runtime ID quickly.
-var hashes = intintmap.New(7000, 0.999)
+var (
+	bitSize int
+	hashes  = intintmap.New(7000, 0.999)
+)
 
 // RegisterBlock registers the Block passed. The EncodeBlock method will be used to encode and decode the
 // block passed. RegisterBlock panics if the block properties returned were not valid, existing properties.
 func RegisterBlock(b Block) {
+	if bitSize > 0 {
+		panic(fmt.Errorf("tried to register a block after the block registry was finalised"))
+	}
 	name, properties := b.EncodeBlock()
-	h := stateHash{name: name, properties: hashProperties(properties)}
-
-	rid, ok := stateRuntimeIDs[h]
+	if _, ok := b.(CustomBlock); ok {
+		registerBlockState(blockState{Name: name, Properties: properties})
+	}
+	rid, ok := stateRuntimeIDs[stateHash{name: name, properties: hashProperties(properties)}]
 	if !ok {
 		// We assume all blocks must have all their states registered beforehand. Vanilla blocks will have
 		// this done through registering of all states present in the block_states.nbt file.
@@ -68,12 +101,50 @@ func RegisterBlock(b Block) {
 	if _, ok := blocks[rid].(unknownBlock); !ok {
 		panic(fmt.Sprintf("block with name and properties %v {%#v} already registered", name, properties))
 	}
-	hash := int64(b.Hash())
-	if other, ok := hashes.Get(hash); ok {
-		panic(fmt.Sprintf("block %#v with hash %v already registered by %#v", b, hash, blocks[other]))
-	}
 	blocks[rid] = b
-	hashes.Put(hash, int64(rid))
+	if c, ok := b.(CustomBlock); ok {
+		if _, ok := customBlocks[name]; !ok {
+			customBlocks[name] = c
+		}
+	}
+}
+
+// finaliseBlockRegistry is called after blocks have finished registering and the palette can be sorted and
+// hashed, which also calls finaliseBlock for each block that has been registered up to this point.
+// noinspection GoUnusedFunction
+//
+//lint:ignore U1000 Function is used through compiler directives.
+func finaliseBlockRegistry() {
+	if bitSize > 0 {
+		return
+	}
+	bitSize = bits.Len64(uint64(len(blocks)))
+	sort.SliceStable(blocks, func(i, j int) bool {
+		nameOne, _ := blocks[i].EncodeBlock()
+		nameTwo, _ := blocks[j].EncodeBlock()
+		return nameOne != nameTwo && fnv1.HashString64(nameOne) < fnv1.HashString64(nameTwo)
+	})
+	for rid, b := range blocks {
+		finaliseBlock(uint32(rid), b)
+		if _, hash := b.Hash(); hash != math.MaxUint64 {
+			// b is not an unknownBlock.
+			h := int64(BlockHash(b))
+			if other, ok := hashes.Get(h); ok {
+				panic(fmt.Sprintf("block %#v with hash %v already registered by %#v", b, h, blocks[other]))
+			}
+			hashes.Put(h, int64(rid))
+		}
+	}
+}
+
+// finaliseBlock stores the necessary information for the provided block to be quickly accessed at runtime.
+func finaliseBlock(rid uint32, b Block) {
+	name, properties := b.EncodeBlock()
+	i := stateHash{name: name, properties: hashProperties(properties)}
+	if name == "minecraft:air" {
+		airRID = rid
+	}
+	stateRuntimeIDs[i] = rid
 
 	if diffuser, ok := b.(lightDiffuser); ok {
 		chunk.FilteringBlocks[rid] = diffuser.LightDiffusionLevel()
@@ -95,14 +166,24 @@ func RegisterBlock(b Block) {
 	}
 }
 
+// BlockHash returns a unique identifier of the block including the block states. This function is used internally
+// to convert a block to a single integer which can be used in map lookups. The hash produced therefore does not
+// need to match anything in the game, but it must be unique among all registered blocks.
+// The tool in `/cmd/blockhash` may be used to automatically generate block hashes of blocks in a package.
+func BlockHash(b Block) uint64 {
+	base, hash := b.Hash()
+	return base | (hash << bitSize)
+}
+
 // BlockRuntimeID attempts to return a runtime ID of a block previously registered using RegisterBlock().
 // If the runtime ID cannot be found because the Block wasn't registered, BlockRuntimeID will panic.
 func BlockRuntimeID(b Block) uint32 {
 	if b == nil {
 		return airRID
 	}
-	if h := b.Hash(); h != math.MaxUint64 {
-		if rid, ok := hashes.Get(int64(h)); ok {
+	if _, h := b.Hash(); h != math.MaxUint64 {
+		// b is not an unknownBlock.
+		if rid, ok := hashes.Get(int64(BlockHash(b))); ok {
 			return uint32(rid)
 		}
 		panic(fmt.Sprintf("cannot find block by non-0 hash of block %#v", b))
@@ -139,6 +220,11 @@ func BlockByName(name string, properties map[string]any) (Block, bool) {
 		return nil, false
 	}
 	return blocks[rid], true
+}
+
+// CustomBlocks returns a map of all custom blocks registered with their names as keys.
+func CustomBlocks() map[string]CustomBlock {
+	return customBlocks
 }
 
 // air returns an air block.
@@ -218,7 +304,7 @@ type replaceableBlock interface {
 }
 
 // replaceable checks if the block at the position passed is replaceable with the block passed.
-func replaceable(w *World, c *chunkData, pos cube.Pos, with Block) bool {
+func replaceable(w *World, c *Column, pos cube.Pos, with Block) bool {
 	if r, ok := w.blockInChunk(c, pos).(replaceableBlock); ok {
 		return r.ReplaceableBy(with)
 	}

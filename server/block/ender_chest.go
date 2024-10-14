@@ -7,7 +7,7 @@ import (
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/sound"
 	"github.com/go-gl/mathgl/mgl64"
-	"go.uber.org/atomic"
+	"sync/atomic"
 )
 
 // enderChestOwner represents an entity that has an ender chest inventory.
@@ -32,7 +32,7 @@ type EnderChest struct {
 
 // NewEnderChest creates a new initialised ender chest.
 func NewEnderChest() EnderChest {
-	return EnderChest{viewers: atomic.NewInt64(0)}
+	return EnderChest{}
 }
 
 // BreakInfo ...
@@ -75,7 +75,7 @@ func (c EnderChest) Activate(pos cube.Pos, _ cube.Face, _ *world.World, u item.U
 
 // AddViewer ...
 func (c EnderChest) AddViewer(w *world.World, pos cube.Pos) {
-	if c.viewers.Inc() == 1 {
+	if c.viewers.Add(1) == 1 {
 		c.open(w, pos)
 	}
 }
@@ -85,7 +85,7 @@ func (c EnderChest) RemoveViewer(w *world.World, pos cube.Pos) {
 	if c.viewers.Load() == 0 {
 		return
 	}
-	if c.viewers.Dec() == 0 {
+	if c.viewers.Add(-1) == 0 {
 		c.close(w, pos)
 	}
 }
@@ -95,7 +95,7 @@ func (c EnderChest) open(w *world.World, pos cube.Pos) {
 	for _, v := range w.Viewers(pos.Vec3()) {
 		v.ViewBlockAction(pos, OpenAction{})
 	}
-	w.PlaySound(pos.Vec3Centre(), sound.ChestOpen{})
+	w.PlaySound(pos.Vec3Centre(), sound.EnderChestOpen{})
 }
 
 // close closes the ender chest, displaying the animation and playing a sound.
@@ -103,7 +103,7 @@ func (c EnderChest) close(w *world.World, pos cube.Pos) {
 	for _, v := range w.Viewers(pos.Vec3()) {
 		v.ViewBlockAction(pos, CloseAction{})
 	}
-	w.PlaySound(pos.Vec3Centre(), sound.ChestClose{})
+	w.PlaySound(pos.Vec3Centre(), sound.EnderChestClose{})
 }
 
 // EncodeNBT ...
@@ -113,7 +113,9 @@ func (c EnderChest) EncodeNBT() map[string]interface{} {
 
 // DecodeNBT ...
 func (c EnderChest) DecodeNBT(map[string]interface{}) interface{} {
-	return NewEnderChest()
+	ec := NewEnderChest()
+	ec.Facing = c.Facing
+	return ec
 }
 
 // EncodeItem ...
@@ -123,7 +125,7 @@ func (EnderChest) EncodeItem() (name string, meta int16) {
 
 // EncodeBlock ...
 func (c EnderChest) EncodeBlock() (name string, properties map[string]interface{}) {
-	return "minecraft:ender_chest", map[string]interface{}{"facing_direction": 2 + int32(c.Facing)}
+	return "minecraft:ender_chest", map[string]any{"minecraft:cardinal_direction": c.Facing.String()}
 }
 
 // allEnderChests ...

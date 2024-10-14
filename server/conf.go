@@ -12,13 +12,13 @@ import (
 	"github.com/df-mc/dragonfly/server/world/biome"
 	"github.com/df-mc/dragonfly/server/world/generator"
 	"github.com/df-mc/dragonfly/server/world/mcdb"
-	"github.com/df-mc/goleveldb/leveldb/opt"
 	"github.com/google/uuid"
 	"github.com/sandertv/gophertunnel/minecraft/resource"
 	"github.com/sirupsen/logrus"
-	"golang.org/x/exp/slices"
 	"os"
 	"path/filepath"
+	"slices"
+	_ "unsafe"
 )
 
 // Config contains options for starting a Minecraft server.
@@ -154,6 +154,7 @@ func (conf Config) New() *Server {
 		p:        make(map[uuid.UUID]*player.Player),
 		world:    &world.World{}, nether: &world.World{}, end: &world.World{},
 	}
+	world_finaliseBlockRegistry()
 	srv.world = srv.createWorld(world.Overworld, &srv.nether, &srv.end)
 	srv.nether = srv.createWorld(world.Nether, &srv.world, &srv.end)
 	srv.end = srv.createWorld(world.End, &srv.nether, &srv.world)
@@ -254,7 +255,7 @@ func (uc UserConfig) Config(log Logger) (Config, error) {
 		DisableResourceBuilding: !uc.Resources.AutoBuildPack,
 	}
 	if uc.World.SaveData {
-		conf.WorldProvider, err = mcdb.New(log, uc.World.Folder, opt.FlateCompression)
+		conf.WorldProvider, err = mcdb.Config{Log: log}.Open(uc.World.Folder)
 		if err != nil {
 			return conf, fmt.Errorf("create world provider: %w", err)
 		}
@@ -283,7 +284,7 @@ func loadResources(dir string) ([]*resource.Pack, error) {
 	}
 	packs := make([]*resource.Pack, len(resources))
 	for i, entry := range resources {
-		packs[i], err = resource.Compile(filepath.Join(dir, entry.Name()))
+		packs[i], err = resource.ReadPath(filepath.Join(dir, entry.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("compile resource (%v): %w", entry.Name(), err)
 		}
@@ -323,3 +324,8 @@ func DefaultConfig() UserConfig {
 	c.Resources.Required = false
 	return c
 }
+
+// noinspection ALL
+//
+//go:linkname world_finaliseBlockRegistry github.com/df-mc/dragonfly/server/world.finaliseBlockRegistry
+func world_finaliseBlockRegistry()

@@ -19,13 +19,13 @@ type Furnace struct {
 	*smelter
 
 	// Facing is the direction the furnace is facing.
-	Facing cube.Face
+	Facing cube.Direction
 	// Lit is true if the furnace is lit.
 	Lit bool
 }
 
 // NewFurnace creates a new initialised furnace. The smelter is properly initialised.
-func NewFurnace(face cube.Face) Furnace {
+func NewFurnace(face cube.Direction) Furnace {
 	return Furnace{
 		Facing:  face,
 		smelter: newSmelter(),
@@ -53,9 +53,9 @@ func (f Furnace) EncodeItem() (name string, meta int16) {
 // EncodeBlock ...
 func (f Furnace) EncodeBlock() (name string, properties map[string]interface{}) {
 	if f.Lit {
-		return "minecraft:lit_furnace", map[string]interface{}{"facing_direction": int32(f.Facing)}
+		return "minecraft:lit_furnace", map[string]interface{}{"minecraft:cardinal_direction": f.Facing.String()}
 	}
-	return "minecraft:furnace", map[string]interface{}{"facing_direction": int32(f.Facing)}
+	return "minecraft:furnace", map[string]interface{}{"minecraft:cardinal_direction": f.Facing.String()}
 }
 
 // UseOnBlock ...
@@ -65,14 +65,18 @@ func (f Furnace) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, w *world
 		return false
 	}
 
-	place(w, pos, NewFurnace(user.Rotation().Direction().Face().Opposite()), user, ctx)
+	place(w, pos, NewFurnace(user.Rotation().Direction().Opposite()), user, ctx)
 	return placed(ctx)
 }
 
 // BreakInfo ...
 func (f Furnace) BreakInfo() BreakInfo {
 	xp := f.Experience()
-	return newBreakInfo(3.5, alwaysHarvestable, pickaxeEffective, oneOf(f)).withXPDropRange(xp, xp)
+	return newBreakInfo(3.5, alwaysHarvestable, pickaxeEffective, oneOf(f)).withXPDropRange(xp, xp).withBreakHandler(func(pos cube.Pos, w *world.World, u item.User) {
+		for _, i := range f.Inventory(w, pos).Clear() {
+			dropItem(w, i, pos.Vec3())
+		}
+	})
 }
 
 // Activate ...
@@ -96,7 +100,7 @@ func (f Furnace) EncodeNBT() map[string]interface{} {
 		"CookTime":     int16(cook.Milliseconds() / 50),
 		"BurnDuration": int16(maximum.Milliseconds() / 50),
 		"StoredXPInt":  int16(f.Experience()),
-		"Items":        nbtconv.InvToNBT(f.Inventory()),
+		"Items":        nbtconv.InvToNBT(f.inventory),
 		"id":           "Furnace",
 	}
 }
@@ -115,13 +119,13 @@ func (f Furnace) DecodeNBT(data map[string]interface{}) interface{} {
 	f.Lit = lit
 	f.setExperience(xp)
 	f.setDurations(remaining, maximum, cook)
-	nbtconv.InvFromNBT(f.Inventory(), nbtconv.Slice(data, "Items"))
+	nbtconv.InvFromNBT(f.inventory, nbtconv.Slice(data, "Items"))
 	return f
 }
 
 // allFurnaces ...
 func allFurnaces() (furnaces []world.Block) {
-	for _, face := range cube.Faces() {
+	for _, face := range cube.Directions() {
 		furnaces = append(furnaces, Furnace{Facing: face})
 		furnaces = append(furnaces, Furnace{Facing: face, Lit: true})
 	}

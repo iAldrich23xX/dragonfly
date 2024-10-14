@@ -33,28 +33,38 @@ func (s Sponge) SmeltInfo() item.SmeltInfo {
 // EncodeItem ...
 func (s Sponge) EncodeItem() (name string, meta int16) {
 	if s.Wet {
-		meta = 1
+		return "minecraft:wet_sponge", 0
 	}
-	return "minecraft:sponge", meta
+	return "minecraft:sponge", 0
 }
 
 // EncodeBlock ...
 func (s Sponge) EncodeBlock() (string, map[string]any) {
 	if s.Wet {
-		return "minecraft:sponge", map[string]any{"sponge_type": "wet"}
+		return "minecraft:wet_sponge", nil
 	}
-	return "minecraft:sponge", map[string]any{"sponge_type": "dry"}
+	return "minecraft:sponge", nil
 }
 
 // UseOnBlock places the sponge, absorbs nearby water if it's still dry and flags it as wet if any water has been
 // absorbed.
 func (s Sponge) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, w *world.World, user item.User, ctx *item.UseContext) (used bool) {
+	var particles = false
 	pos, _, used = firstReplaceable(w, pos, face, s)
 	if !used {
 		return
 	}
 
+	// Check if the Sponge is placed in the Nether and if so, turn it into a normal Sponge instantly.
+	if w.Dimension().WaterEvaporates() && s.Wet {
+		s.Wet = false
+		particles = true
+	}
+
 	place(w, pos, s, user, ctx)
+	if particles && placed(ctx) {
+		w.AddParticle(pos.Side(cube.FaceUp).Vec3(), particle.Evaporate{})
+	}
 	return placed(ctx)
 }
 

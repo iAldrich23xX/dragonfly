@@ -2,9 +2,10 @@ package recipe
 
 import (
 	_ "embed"
+
 	// Ensure all blocks and items are registered before trying to load vanilla recipes.
 	_ "github.com/df-mc/dragonfly/server/block"
-	_ "github.com/df-mc/dragonfly/server/item"
+	"github.com/df-mc/dragonfly/server/item"
 	"github.com/sandertv/gophertunnel/minecraft/nbt"
 )
 
@@ -13,8 +14,10 @@ var (
 	vanillaCraftingData []byte
 	//go:embed smithing_data.nbt
 	vanillaSmithingData []byte
-	//go:embed stonecutter_data.nbt
-	vanillaStonecutterData []byte
+	//go:embed smithing_trim_data.nbt
+	vanillaSmithingTrimData []byte
+	//go:embed furnace_data.nbt
+	furnaceData []byte
 )
 
 // shapedRecipe is a recipe that must be crafted in a specific shape.
@@ -35,6 +38,13 @@ type shapelessRecipe struct {
 	Priority int32       `nbt:"priority"`
 }
 
+// furnaceRecipe is a recipe that may be crafted in a furnace.
+type furnaceRecipe struct {
+	Input  inputItem  `nbt:"input"`
+	Output outputItem `nbt:"output"`
+	Block  string     `nbt:"block"`
+}
+
 func init() {
 	var craftingRecipes struct {
 		Shaped    []shapedRecipe    `nbt:"shaped"`
@@ -44,13 +54,8 @@ func init() {
 		panic(err)
 	}
 
-	var stonecutterRecipes []shapelessRecipe
-	if err := nbt.Unmarshal(vanillaStonecutterData, &stonecutterRecipes); err != nil {
-		panic(err)
-	}
-
-	for _, s := range append(craftingRecipes.Shapeless, stonecutterRecipes...) {
-		input, ok := s.Input.Stacks()
+	for _, s := range craftingRecipes.Shapeless {
+		input, ok := s.Input.Items()
 		output, okTwo := s.Output.Stacks()
 		if !ok || !okTwo {
 			// This can be expected to happen, as some recipes contain blocks or items that aren't currently implemented.
@@ -65,7 +70,7 @@ func init() {
 	}
 
 	for _, s := range craftingRecipes.Shaped {
-		input, ok := s.Input.Stacks()
+		input, ok := s.Input.Items()
 		output, okTwo := s.Output.Stacks()
 		if !ok || !okTwo {
 			// This can be expected to happen - refer to the comment above.
@@ -88,17 +93,55 @@ func init() {
 	}
 
 	for _, s := range smithingRecipes {
-		input, ok := s.Input.Stacks()
+		input, ok := s.Input.Items()
 		output, okTwo := s.Output.Stacks()
 		if !ok || !okTwo {
 			// This can be expected to happen - refer to the comment above.
 			continue
 		}
-		Register(Smithing{recipe{
+		Register(SmithingTransform{recipe{
 			input:    input,
 			output:   output,
 			block:    s.Block,
 			priority: uint32(s.Priority),
+		}})
+	}
+
+	var smithingTrimRecipes []shapelessRecipe
+	if err := nbt.Unmarshal(vanillaSmithingTrimData, &smithingTrimRecipes); err != nil {
+		panic(err)
+	}
+
+	for _, s := range smithingTrimRecipes {
+		input, ok := s.Input.Items()
+		if !ok {
+			// This can be expected to happen - refer to the comment above.
+			continue
+		}
+		Register(SmithingTrim{recipe{
+			input:    input,
+			block:    s.Block,
+			priority: uint32(s.Priority),
+		}})
+	}
+
+	var furnaceRecipes []furnaceRecipe
+	if err := nbt.Unmarshal(furnaceData, &furnaceRecipes); err != nil {
+		panic(err)
+	}
+
+	for _, s := range furnaceRecipes {
+		input, ok := s.Input.Item()
+		output, okTwo := s.Output.Stack()
+		if !ok || !okTwo {
+			// This can be expected to happen - refer to the comment above.
+			continue
+		}
+
+		Register(Furnace{recipe{
+			input:  []Item{input},
+			output: []item.Stack{output},
+			block:  s.Block,
 		}})
 	}
 }
